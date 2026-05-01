@@ -123,3 +123,9 @@ Dataset is not included in this repository due to size constraints.
 Public citrus disease datasets can be used for testing and validation.
 
 ---
+
+👨‍💻 Author
+
+Your Name
+GitHub: jhasu_622
+Email: jhasujamisetty@gmail.com
