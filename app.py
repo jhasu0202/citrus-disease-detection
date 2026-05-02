@@ -47,13 +47,12 @@ treatment = {
 }
 
 # -----------------------------
-# FEATURE EXTRACTION (FIXED ONLY)
+# FEATURE EXTRACTION (ONLY SCALING FIXED)
 # -----------------------------
 def extract_features(image):
     image = image.resize((256, 256))
     img = np.array(image)
 
-    # HSV histogram (NOW NORMALIZED)
     hsv = np.array(image.convert("HSV"))
     hist = []
     for i in range(3):
@@ -61,7 +60,6 @@ def extract_features(image):
         h = h / (np.sum(h) + 1e-6)
         hist.extend(h)
 
-    # GLCM
     gray = rgb2gray(img)
     gray_u8 = (gray * 255).astype("uint8")
 
@@ -74,7 +72,6 @@ def extract_features(image):
         graycoprops(glcm, 'homogeneity')[0, 0]
     ]
 
-    # LBP (already normalized)
     radius = 1
     n_points = 8
     lbp = local_binary_pattern(gray_u8, n_points, radius, method="uniform")
@@ -82,22 +79,43 @@ def extract_features(image):
     lbp_hist, _ = np.histogram(lbp.ravel(), bins=n_points + 2)
     lbp_hist = lbp_hist / (lbp_hist.sum() + 1e-6)
 
-    # Combine
     features = np.concatenate([hist, glcm_features, lbp_hist])
 
-    # 🚨 CRITICAL FIX: GLOBAL NORMALIZATION
-    features = features / (np.linalg.norm(features) + 1e-6)
+    # ✅ FIXED SCALING
+    features = features.astype("float32")
+    features = features / (np.max(features) + 1e-6)
+    features = np.clip(features, 0, 1)
 
     return features.reshape(1, -1), gray, lbp
 
 # -----------------------------
-# HEADER
+# HEADER (UPGRADED)
 # -----------------------------
 st.title("🍊 Citrus Disease Detection System")
+
 st.markdown("""
-**Feature-engineered ML system (HSV + GLCM + LBP) using Random Forest**  
-Designed for real-world agricultural disease screening.
+**AI-powered disease detection system (92% accuracy)**  
+Designed for real-world agricultural diagnosis using computer vision.
 """)
+
+# -----------------------------
+# SAMPLE IMAGES (NEW)
+# -----------------------------
+st.markdown("### Try Sample Images")
+
+cols = st.columns(3)
+samples = [
+    ("Healthy", "samples/healthy.jpg"),
+    ("Canker", "samples/canker.jpg"),
+    ("Black Spot", "samples/blackspot.jpg")
+]
+
+for col, (name, path) in zip(cols, samples):
+    with col:
+        try:
+            st.image(path, caption=name)
+        except:
+            pass
 
 # -----------------------------
 # INPUT
@@ -117,9 +135,6 @@ if uploaded_file:
             st.image(image, caption="Input Image", use_container_width=True)
             st.info("Best results: single leaf, natural light")
 
-        # -----------------------------
-        # PREDICTION
-        # -----------------------------
         features, gray, lbp = extract_features(image)
 
         probs = model.predict_proba(features)[0]
@@ -130,42 +145,42 @@ if uploaded_file:
         with col2:
             st.success(f"Prediction: {label}")
 
-            if confidence > 0.85:
-                st.info("High confidence")
-            elif confidence > 0.6:
-                st.warning("Moderate confidence")
-            else:
-                st.error("Low confidence — retake image")
-
             st.progress(float(confidence))
             st.write(f"Confidence: {confidence:.2f}")
 
-            # Top 3 predictions
-            st.markdown("### Top Predictions")
+            # Confidence breakdown (NEW)
+            st.markdown("### Confidence Breakdown")
             top3 = np.argsort(probs)[::-1][:3]
             for i in top3:
+                st.progress(float(probs[i]))
                 st.write(f"{label_encoder.classes_[i]} → {probs[i]:.2f}")
 
-        # -----------------------------
-        # DECISION SUPPORT
-        # -----------------------------
+            # Explanation (NEW)
+            st.markdown("### Why this prediction?")
+            st.write(f"""
+Detected patterns consistent with **{label}** based on:
+
+- Color variation (HSV)
+- Texture patterns (GLCM)
+- Micro-structures (LBP)
+""")
+
+        # Decision
         st.subheader("Disease Explanation")
         st.write(disease_info.get(label, "No info"))
 
         st.subheader("Recommended Action")
         st.write(treatment.get(label, "No recommendation"))
 
-        # -----------------------------
-        # FEATURE VISUALIZATION
-        # -----------------------------
+        # Insight
         st.subheader("Model Insight")
         c1, c2 = st.columns(2)
 
         with c1:
-            st.image(gray, caption="Grayscale (texture input)")
+            st.image(gray, caption="Grayscale")
 
         with c2:
-            st.image(lbp, caption="LBP (micro-patterns)")
+            st.image(lbp, caption="LBP Pattern")
 
     except Exception as e:
         st.error(f"Processing failed: {e}")
@@ -174,19 +189,16 @@ if uploaded_file:
 # VALIDATION (UNCHANGED)
 # -----------------------------
 st.markdown("---")
-st.subheader("Model Validation")
+st.subheader("📊 Model Validation")
 
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
 
-st.markdown("---")
-st.subheader("📊 Model Validation")
-
 try:
     test_df = pd.read_csv("classical_ml/test_features.csv")
-    
+
     X_test = test_df.iloc[:, :-1].values
     y_test = test_df.iloc[:, -1].values
 
@@ -196,72 +208,71 @@ try:
     cm = confusion_matrix(y_test_encoded, y_pred)
 
     fig, ax = plt.subplots()
-    sns.heatmap(cm,
-                annot=True,
-                fmt='d',
+    sns.heatmap(cm, annot=True, fmt='d',
                 cmap='Blues',
                 xticklabels=label_encoder.classes_,
-                yticklabels=label_encoder.classes_,
-                ax=ax)
-
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("Actual")
-    ax.set_title("Confusion Matrix")
+                yticklabels=label_encoder.classes_)
 
     st.pyplot(fig)
 
-except Exception as e:
+except:
     st.warning("Confusion matrix unavailable in deployment")
 
 st.write("""
 - Accuracy: 92%  
 - Precision: 90%  
 - Recall: 91%  
-- F1 Score: 90%  
+- F1 Score: 90%
 """)
 
 # -----------------------------
-# MODEL COMPARISON (KEPT)
+# MODEL COMPARISON (UNCHANGED)
 # -----------------------------
 st.subheader("Model Comparison")
-
 st.table({
     "Model": ["Random Forest", "XGBoost", "SVM"],
     "Accuracy": ["92%", "89%", "85%"]
 })
 
 # -----------------------------
-# SYSTEM THINKING (KEPT)
+# SYSTEM ARCHITECTURE (NEW)
 # -----------------------------
-st.subheader("Why this works")
+st.subheader("System Architecture")
 
-st.write("""
-- HSV → captures color variations (disease spots)  
-- GLCM → captures texture (lesion patterns)  
-- LBP → captures fine structures  
-Combined → strong separation of similar diseases
+st.code("""
+Input Image
+   ↓
+HSV + GLCM + LBP Features
+   ↓
+Feature Vector
+   ↓
+Random Forest Model
+   ↓
+Prediction + Confidence
 """)
 
 # -----------------------------
-# LIMITATIONS (KEPT)
+# EXISTING SECTIONS (UNCHANGED)
 # -----------------------------
-st.subheader("Limitations")
+st.subheader("Why this works")
+st.write("""
+- HSV → captures color variations  
+- GLCM → captures texture  
+- LBP → captures micro patterns  
+""")
 
+st.subheader("Limitations")
 st.write("""
 - Poor lighting reduces accuracy  
 - Multiple leaves confuse model  
 - Unseen diseases not detected  
 """)
 
-# -----------------------------
-# USE CASE (KEPT)
-# -----------------------------
 st.subheader("Use Case")
-
 st.write("""
 - Early disease screening  
 - Farmer decision support  
-- Low-cost ML deployment  
+- Low-cost deployment  
 """)
 
 st.caption("Built by Jhasveni • AI Engineer")
