@@ -104,8 +104,9 @@ Designed for practical agricultural diagnosis using computer vision.
 st.subheader("Dataset")
 
 st.write("""
-- Training Images: 2027  
+- Training Images: 1808  
 - Test Images: 219  
+- Split : 80% - 20%
 - Multi-class citrus disease dataset  
 - Includes real-world variability (lighting, texture, noise, similar disease patterns)  
 """)
@@ -173,6 +174,12 @@ Detected patterns consistent with **{label}** based on:
 - Texture patterns (GLCM)
 - Micro-structures (LBP)
 """)
+            if confidence < 0.6:
+    st.error("⚠️ Low confidence — prediction may be unreliable")
+elif confidence < 0.8:
+    st.warning("Moderate confidence — verify manually")
+else:
+    st.success("High confidence prediction")
 
         st.subheader("Disease Explanation")
         st.write(disease_info.get(label, "No info"))
