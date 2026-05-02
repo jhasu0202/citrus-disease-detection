@@ -279,6 +279,22 @@ st.write("""
 - 0.6–0.85 → moderate confidence  
 - <0.6 → uncertain prediction  
 """)
+st.subheader("System Performance")
+
+st.write("""
+- Average inference time: < 0.1 sec  
+- Lightweight model for edge deployment  
+- No GPU required  
+""")
+st.subheader("Model Scope")
+
+st.write("""
+This model is trained only on known citrus diseases.
+It will NOT correctly identify:
+- New diseases
+- Non-citrus plants
+- Severely damaged leaves
+""")
 # -----------------------------
 # SYSTEM + THINKING (NEW TOP LAYER)
 # -----------------------------
