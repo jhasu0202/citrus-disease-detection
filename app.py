@@ -1,6 +1,7 @@
 import streamlit as st
 import numpy as np
 import joblib
+import time
 from PIL import Image
 from skimage.color import rgb2gray
 from skimage.feature import graycomatrix, graycoprops, local_binary_pattern
@@ -104,11 +105,11 @@ Designed for practical agricultural diagnosis using computer vision.
 st.subheader("Dataset")
 
 st.write("""
-- Training Images: 1808  
-- Test Images: 219  
-- Split : 80% - 20%
-- Multi-class citrus disease dataset  
-- Includes real-world variability (lighting, texture, noise, similar disease patterns)  
+- Total Images: 2027  
+- Train: 1808  
+- Test: 219  
+- Approximate Split: ~89% / 11%  
+- Multi-class dataset with real-world variability  
 """)
 
 # -----------------------------
@@ -142,8 +143,9 @@ if uploaded_file:
     try:
         image = Image.open(uploaded_file).convert("RGB")
 
+        if image.size[0] < 100 or image.size[1] < 100:st.warning("Low resolution image may reduce accuracy")
         col1, col2 = st.columns([1.2, 1])
-
+            
         with col1:
             st.image(image, caption="Input Image", use_container_width=True)
             st.info("Best results: single leaf, natural light")
@@ -151,19 +153,21 @@ if uploaded_file:
         # -----------------------------
         # FEATURE + PREDICTION
         # -----------------------------
+        start = time.time()
         features, gray, lbp = extract_features(image)
 
         probs = model.predict_proba(features)[0]
         idx = np.argmax(probs)
         label = label_encoder.inverse_transform([idx])[0]
         confidence = probs[idx]
-
+        end = time.time()
+        st.caption(f"Inference Time: {(end - start):.3f} seconds")
         # -----------------------------
         # OUTPUT COLUMN
         # -----------------------------
         with col2:
             st.markdown(f"## Prediction: **{label}**")
-            st.progress(float(confidence))
+            st.progress(min(float(confidence), 1.0))
             st.write(f"Confidence: {confidence:.2f}")
 
             # Confidence messaging
@@ -268,6 +272,13 @@ st.write("""
 - Canker → 94%
 - Healthy → 95%
 """)
+st.subheader("Confidence Interpretation")
+
+st.write("""
+- >0.85 → reliable prediction  
+- 0.6–0.85 → moderate confidence  
+- <0.6 → uncertain prediction  
+""")
 # -----------------------------
 # SYSTEM + THINKING (NEW TOP LAYER)
 # -----------------------------
@@ -343,6 +354,12 @@ st.write("""
 - Stable on small datasets compared to deep learning  
 """)
 
+st.subheader("System Reliability")
+
+st.write("""
+This system is designed for early screening and decision support.  
+It should not replace expert diagnosis in critical scenarios.
+""")
 st.subheader("Use Case")
 st.write("""
 - Early disease screening  
