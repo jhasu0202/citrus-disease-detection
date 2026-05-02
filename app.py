@@ -89,17 +89,29 @@ def extract_features(image):
     return features.reshape(1, -1), gray, lbp
 
 # -----------------------------
-# HEADER (UPGRADED)
+# HEADER
 # -----------------------------
-st.title("🍊 Citrus Disease Detection System")
+st.title("🍊 AI-Powered Citrus Disease Detection System")
 
 st.markdown("""
-**AI-powered disease detection system (92% accuracy)**  
-Designed for real-world agricultural diagnosis using computer vision.
+**92% accuracy on real-world dataset**  
+Designed for practical agricultural diagnosis using computer vision.
 """)
 
 # -----------------------------
-# SAMPLE IMAGES (NEW)
+# DATASET (NEW - STRONG)
+# -----------------------------
+st.subheader("Dataset")
+
+st.write("""
+- Training Images: 2027  
+- Test Images: 219  
+- Multi-class citrus disease dataset  
+- Includes real-world variability (lighting, texture, noise, similar disease patterns)  
+""")
+
+# -----------------------------
+# SAMPLE IMAGES (EXISTING)
 # -----------------------------
 st.markdown("### Try Sample Images")
 
@@ -144,18 +156,15 @@ if uploaded_file:
 
         with col2:
             st.success(f"Prediction: {label}")
-
             st.progress(float(confidence))
             st.write(f"Confidence: {confidence:.2f}")
 
-            # Confidence breakdown (NEW)
             st.markdown("### Confidence Breakdown")
             top3 = np.argsort(probs)[::-1][:3]
             for i in top3:
                 st.progress(float(probs[i]))
                 st.write(f"{label_encoder.classes_[i]} → {probs[i]:.2f}")
 
-            # Explanation (NEW)
             st.markdown("### Why this prediction?")
             st.write(f"""
 Detected patterns consistent with **{label}** based on:
@@ -165,14 +174,12 @@ Detected patterns consistent with **{label}** based on:
 - Micro-structures (LBP)
 """)
 
-        # Decision
         st.subheader("Disease Explanation")
         st.write(disease_info.get(label, "No info"))
 
         st.subheader("Recommended Action")
         st.write(treatment.get(label, "No recommendation"))
 
-        # Insight
         st.subheader("Model Insight")
         c1, c2 = st.columns(2)
 
@@ -186,7 +193,7 @@ Detected patterns consistent with **{label}** based on:
         st.error(f"Processing failed: {e}")
 
 # -----------------------------
-# VALIDATION (UNCHANGED)
+# VALIDATION
 # -----------------------------
 st.markdown("---")
 st.subheader("📊 Model Validation")
@@ -226,7 +233,7 @@ st.write("""
 """)
 
 # -----------------------------
-# MODEL COMPARISON (UNCHANGED)
+# MODEL COMPARISON
 # -----------------------------
 st.subheader("Model Comparison")
 st.table({
@@ -235,24 +242,42 @@ st.table({
 })
 
 # -----------------------------
-# SYSTEM ARCHITECTURE (NEW)
+# SYSTEM + THINKING (NEW TOP LAYER)
 # -----------------------------
-st.subheader("System Architecture")
+st.subheader("Why Random Forest?")
 
-st.code("""
-Input Image
-   ↓
-HSV + GLCM + LBP Features
-   ↓
-Feature Vector
-   ↓
-Random Forest Model
-   ↓
-Prediction + Confidence
+st.write("""
+- Works well with structured handcrafted features  
+- Requires less data than deep learning  
+- More interpretable and stable  
+""")
+
+st.subheader("Engineering Decisions")
+
+st.write("""
+- Chose feature engineering over CNN due to dataset size  
+- Combined color + texture + micro patterns  
+- Focused on robustness over complexity  
+""")
+
+st.subheader("Failure Analysis")
+
+st.write("""
+- Performance drops in extreme lighting  
+- Multiple leaves reduce accuracy  
+- Unseen diseases not recognized  
+""")
+
+st.subheader("Deployment Perspective")
+
+st.write("""
+- Lightweight and deployable  
+- Suitable for low-resource environments  
+- Can be extended to mobile-based diagnosis  
 """)
 
 # -----------------------------
-# EXISTING SECTIONS (UNCHANGED)
+# EXISTING SECTIONS
 # -----------------------------
 st.subheader("Why this works")
 st.write("""
