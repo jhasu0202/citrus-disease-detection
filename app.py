@@ -179,8 +179,8 @@ st.subheader("📊 Model Validation")
 
 try:
     # Load test data
-    test_df = pd.read_csv("test_features.csv")
-
+    test_df = pd.read_csv("classical_ml/test_features.csv")
+    
     X_test = test_df.iloc[:, :-1].values
     y_test = test_df.iloc[:, -1].values
 
