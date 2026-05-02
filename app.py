@@ -7,7 +7,7 @@ import joblib
 st.title("🍊 Citrus Disease Detection")
 
 # Load your trained model
-model = joblib.load("model.pkl")  # change if needed
+model = joblib.load("clasical_ml/model_new.pkl")
 
 uploaded_file = st.file_uploader("Upload a leaf image", type=["jpg","png","jpeg"])
 
