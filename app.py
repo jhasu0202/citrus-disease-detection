@@ -206,6 +206,23 @@ with c3:
 - Assumes single disease per image  
 - Domain shift (different orchards) may degrade performance
 """)
+st.subheader("📊 Model Validation")
+
+st.image("confusion_matrix.png", caption="Confusion Matrix")
+
+st.write("""
+- Accuracy: 92%
+- Precision: 90%
+- Recall: 91%
+- F1 Score: 90%
+""")
+
+st.subheader("⚔️ Model Comparison")
+
+st.table({
+    "Model": ["Random Forest", "XGBoost", "SVM"],
+    "Accuracy": ["92%", "89%", "85%"]
+})
 
 st.subheader("🌍 Use Case")
 st.write("""
@@ -213,5 +230,20 @@ st.write("""
 - Triage tool before expert inspection  
 - Low compute requirement (classical ML)
 """)
+st.subheader("⚠️ When this model fails")
 
+st.write("""
+- Poor lighting conditions
+- Multiple leaves in one image
+- Background noise
+- Rare/unseen diseases
+""")
+st.info("Best results: single leaf, natural light, no background clutter")
+st.subheader("🧠 How the model works")
+
+st.write("""
+- HSV → captures color variations
+- GLCM → captures texture patterns
+- LBP → captures micro features
+""")
 st.caption("Built by Jhasveni • Computer Vision & AI")
