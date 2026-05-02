@@ -148,34 +148,41 @@ if uploaded_file:
             st.image(image, caption="Input Image", use_container_width=True)
             st.info("Best results: single leaf, natural light")
 
+        # -----------------------------
+        # FEATURE + PREDICTION
+        # -----------------------------
         features, gray, lbp = extract_features(image)
 
         probs = model.predict_proba(features)[0]
         idx = np.argmax(probs)
         label = label_encoder.inverse_transform([idx])[0]
-       confidence = probs[idx]
+        confidence = probs[idx]
 
-with col2:
-    st.success(f"Prediction: {label}")
-    st.progress(float(confidence))
-    st.write(f"Confidence: {confidence:.2f}")
+        # -----------------------------
+        # OUTPUT COLUMN
+        # -----------------------------
+        with col2:
+            st.markdown(f"## Prediction: **{label}**")
+            st.progress(float(confidence))
+            st.write(f"Confidence: {confidence:.2f}")
 
-    # ✅ Proper confidence messaging
-    if confidence < 0.6:
-        st.error("⚠️ Low confidence — prediction may be unreliable")
-    elif confidence < 0.8:
-        st.warning("Moderate confidence — verify manually")
-    else:
-        st.success("High confidence prediction")
+            # Confidence messaging
+            if confidence < 0.6:
+                st.error("⚠️ Low confidence — prediction may be unreliable")
+            elif confidence < 0.8:
+                st.warning("Moderate confidence — verify manually")
+            else:
+                st.success("High confidence prediction")
 
-    # ✅ Confidence breakdown
-    st.markdown("### Confidence Breakdown")
-    top3 = np.argsort(probs)[::-1][:3]
+            # Confidence breakdown
+            st.markdown("### Confidence Breakdown")
+            top3 = np.argsort(probs)[::-1][:3]
 
-    for i in top3:
-        st.progress(float(probs[i]))
-        st.write(f"{label_encoder.classes_[i]} → {probs[i]:.2f}")
+            for i in top3:
+                st.progress(float(probs[i]))
+                st.write(f"{label_encoder.classes_[i]} → {probs[i]:.2f}")
 
+            # Explanation
             st.markdown("### Why this prediction?")
             st.write(f"""
 Detected patterns consistent with **{label}** based on:
@@ -184,6 +191,10 @@ Detected patterns consistent with **{label}** based on:
 - Texture patterns (GLCM)
 - Micro-structures (LBP)
 """)
+
+        # -----------------------------
+        # DETAILS SECTION
+        # -----------------------------
         st.subheader("Disease Explanation")
         st.write(disease_info.get(label, "No info"))
 
@@ -201,7 +212,6 @@ Detected patterns consistent with **{label}** based on:
 
     except Exception as e:
         st.error(f"Processing failed: {e}")
-
 # -----------------------------
 # VALIDATION
 # -----------------------------
