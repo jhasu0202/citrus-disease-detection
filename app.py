@@ -5,31 +5,50 @@ from PIL import Image
 from skimage.color import rgb2gray
 from skimage.feature import graycomatrix, graycoprops, local_binary_pattern
 
-# ---------------------------
-# LOAD MODEL + LABEL ENCODER
-# ---------------------------
+# -----------------------
+# LOAD MODEL
+# -----------------------
 model = joblib.load("classical_ml/final_rf_tuned.pkl")
 label_encoder = joblib.load("classical_ml/rf_label_encoder.pkl")
 
-# ---------------------------
-# FEATURE EXTRACTION FUNCTION
-# ---------------------------
+# -----------------------
+# DISEASE INFO
+# -----------------------
+disease_info = {
+    "Anthracnose": "Fungal disease causing dark lesions on leaves and fruits.",
+    "Black spot": "Causes black circular spots on leaves; spreads in humid conditions.",
+    "Canker": "Bacterial infection leading to lesions and leaf drop.",
+    "Greening": "Serious disease affecting citrus production and fruit quality.",
+    "Healthy": "Leaf shows no disease symptoms.",
+    "Melanose": "Fungal disease causing small dark spots on leaves."
+}
+
+treatment = {
+    "Anthracnose": "Apply fungicides and remove infected parts.",
+    "Black spot": "Use copper fungicide and maintain dryness.",
+    "Canker": "Prune infected areas and apply antibacterial spray.",
+    "Greening": "Control insect vectors and remove infected trees.",
+    "Healthy": "No treatment required.",
+    "Melanose": "Apply fungicides and improve airflow."
+}
+
+# -----------------------
+# FEATURE EXTRACTION
+# -----------------------
 def extract_features(image):
 
-    # Resize
     image = image.resize((256, 256))
     img = np.array(image)
 
-    # ---------- HSV HISTOGRAM ----------
+    # HSV histogram
     hsv = np.array(image.convert("HSV"))
-
-    hist_h, _ = np.histogram(hsv[:, :, 0], bins=32, range=(0, 255))
-    hist_s, _ = np.histogram(hsv[:, :, 1], bins=32, range=(0, 255))
-    hist_v, _ = np.histogram(hsv[:, :, 2], bins=32, range=(0, 255))
+    hist_h, _ = np.histogram(hsv[:,:,0], bins=32, range=(0,255))
+    hist_s, _ = np.histogram(hsv[:,:,1], bins=32, range=(0,255))
+    hist_v, _ = np.histogram(hsv[:,:,2], bins=32, range=(0,255))
 
     hist_features = np.concatenate([hist_h, hist_s, hist_v])
 
-    # ---------- GLCM ----------
+    # GLCM
     gray = rgb2gray(img)
     gray = (gray * 255).astype("uint8")
 
@@ -42,42 +61,47 @@ def extract_features(image):
 
     glcm_features = np.array([contrast, correlation, energy, homogeneity])
 
-    # ---------- LBP ----------
+    # LBP
     radius = 1
     n_points = 8 * radius
 
     lbp = local_binary_pattern(gray, n_points, radius, method="uniform")
-    lbp_hist, _ = np.histogram(lbp.ravel(), bins=n_points + 2, range=(0, n_points + 2))
-    lbp_hist = lbp_hist.astype("float")
-    lbp_hist /= (lbp_hist.sum() + 1e-6)
+    lbp_hist, _ = np.histogram(lbp.ravel(), bins=n_points+2, range=(0, n_points+2))
+    lbp_hist = lbp_hist / (lbp_hist.sum() + 1e-6)
 
-    # ---------- FINAL FEATURE VECTOR ----------
     features = np.concatenate([hist_features, glcm_features, lbp_hist])
 
     return features.reshape(1, -1)
 
 
-# ---------------------------
-# UI STARTS HERE
-# ---------------------------
+# -----------------------
+# UI
+# -----------------------
 st.set_page_config(page_title="Citrus Disease Detection", layout="centered")
 
 st.title("🍊 Citrus Disease Detection System")
 
 st.write("""
-Upload a citrus leaf image to detect disease using a machine learning model 
-trained with **feature engineering (HSV + GLCM + LBP)** and Random Forest.
+Detect citrus leaf diseases using a **Machine Learning system** based on:
+- Color Features (HSV)
+- Texture Features (GLCM)
+- Pattern Features (LBP)
+- Random Forest Classifier
 """)
 
-# ---------------------------
-# FILE UPLOAD
-# ---------------------------
-uploaded_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
+# -----------------------
+# UPLOAD
+# -----------------------
+uploaded_file = st.file_uploader("Upload Leaf Image", type=["jpg", "png", "jpeg"])
 
 if uploaded_file:
     image = Image.open(uploaded_file).convert("RGB")
 
     st.image(image, caption="Uploaded Image", use_container_width=True)
+
+    # Quality check
+    if image.size[0] < 100 or image.size[1] < 100:
+        st.warning("⚠️ Low resolution image. Results may be inaccurate.")
 
     # Extract features
     features = extract_features(image)
@@ -87,50 +111,52 @@ if uploaded_file:
     label = label_encoder.inverse_transform(prediction)[0]
 
     # Confidence
-    probabilities = model.predict_proba(features)
-    confidence = np.max(probabilities)
+    probs = model.predict_proba(features)
+    confidence = np.max(probs)
 
-    # ---------------------------
+    # -----------------------
     # OUTPUT
-    # ---------------------------
+    # -----------------------
     st.success(f"Prediction: {label}")
-    st.info(f"Confidence: {confidence:.2f}")
 
-    # ---------------------------
-    # MODEL EXPLANATION
-    # ---------------------------
-    st.subheader("🧠 What the model analyzes")
+    st.subheader("📊 Confidence")
+    st.progress(float(confidence))
+    st.write(f"{confidence:.2f}")
 
-    st.write("""
-    • **Color Features (HSV Histogram)** – captures leaf color patterns  
-    • **Texture Features (GLCM)** – identifies disease texture differences  
-    • **Pattern Features (LBP)** – detects micro-pattern variations  
-    """)
+    # -----------------------
+    # DETAILS
+    # -----------------------
+    st.subheader("🧾 Disease Details")
+    st.write(disease_info.get(label, "No information available"))
 
-# ---------------------------
-# PERFORMANCE SECTION
-# ---------------------------
-st.subheader("📊 Model Performance")
+    st.subheader("💡 Recommended Action")
+    st.write(treatment.get(label, "No recommendation available"))
 
-st.write("Model trained using Random Forest with ~92% accuracy on test data.")
+# -----------------------
+# EXTRA SECTIONS
+# -----------------------
+st.markdown("---")
 
-# OPTIONAL (only if you upload images to repo)
-# st.image("confusion_matrix.png")
-# st.image("accuracy_plot.png")
-
-# ---------------------------
-# REAL WORLD IMPACT
-# ---------------------------
-st.subheader("🌱 Real-world Impact")
-
+st.subheader("⚙️ How it Works")
 st.write("""
-• Early detection of plant diseases  
-• Helps farmers reduce crop loss  
-• Supports precision agriculture  
+1. Image preprocessing  
+2. Feature extraction (HSV, GLCM, LBP)  
+3. Random Forest classification  
+4. Disease prediction  
 """)
 
-# ---------------------------
+st.subheader("📊 Model Performance")
+st.write("Model achieved ~92% accuracy on test dataset.")
+
+st.subheader("🌱 Real-World Impact")
+st.write("""
+• Early disease detection  
+• Reduces crop loss  
+• Supports farmers in decision-making  
+""")
+
+# -----------------------
 # FOOTER
-# ---------------------------
+# -----------------------
 st.markdown("---")
-st.caption("Built by Jhasveni • Computer Vision & AI")
+st.caption("Built by Jhasveni | Computer Vision & AI")
