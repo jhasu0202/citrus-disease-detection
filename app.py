@@ -275,10 +275,11 @@ st.write("""
 st.subheader("Confidence Interpretation")
 
 st.write("""
-- >0.85 → reliable prediction  
+- > 0.85 → reliable prediction  
 - 0.6–0.85 → moderate confidence  
-- <0.6 → uncertain prediction  
+- < 0.6 → uncertain prediction  
 """)
+
 st.subheader("System Performance")
 
 st.write("""
