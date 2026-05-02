@@ -208,7 +208,7 @@ with c3:
 """)
 st.subheader("📊 Model Validation")
 
-st.image("confusion_matrix.png", caption="Confusion Matrix")
+st.image("confusion_matrix_rf.py", caption="Confusion Matrix")
 
 st.write("""
 - Accuracy: 92%
