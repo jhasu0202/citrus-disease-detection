@@ -370,7 +370,12 @@ st.write("""
 - Feature-based → interpretable predictions  
 - Stable on small datasets compared to deep learning  
 """)
+st.subheader("Confidence Meaning")
 
+st.write("""
+Confidence represents model certainty, not correctness.
+High confidence can still be wrong in unseen conditions.
+""")
 st.subheader("System Reliability")
 
 st.write("""
