@@ -159,7 +159,9 @@ if uploaded_file:
             st.success(f"Prediction: {label}")
             st.progress(float(confidence))
             st.write(f"Confidence: {confidence:.2f}")
-
+             if confidence < 0.6: st.error("⚠️ Low confidence — prediction may be unreliable")
+             elif confidence < 0.8: st.warning("Moderate confidence — verify manually")
+             else:st.success("High confidence prediction")
             st.markdown("### Confidence Breakdown")
             top3 = np.argsort(probs)[::-1][:3]
             for i in top3:
@@ -174,13 +176,6 @@ Detected patterns consistent with **{label}** based on:
 - Texture patterns (GLCM)
 - Micro-structures (LBP)
 """)
-            if confidence < 0.6:
-    st.error("⚠️ Low confidence — prediction may be unreliable")
-elif confidence < 0.8:
-    st.warning("Moderate confidence — verify manually")
-else:
-    st.success("High confidence prediction")
-
         st.subheader("Disease Explanation")
         st.write(disease_info.get(label, "No info"))
 
