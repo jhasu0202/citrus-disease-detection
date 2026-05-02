@@ -4,5 +4,7 @@ pandas
 scikit-learn
 joblib
 Pillow
-scikit-image
 opencv-python-headless
+scikit-image
+matplotlib
+seaborn
