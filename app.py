@@ -169,7 +169,48 @@ if uploaded_file:
 st.markdown("---")
 st.subheader("Model Validation")
 
-st.image("confusion_matrix.png", caption="Confusion Matrix")
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
+
+st.markdown("---")
+st.subheader("📊 Model Validation")
+
+try:
+    # Load test data
+    test_df = pd.read_csv("test_features.csv")
+
+    X_test = test_df.iloc[:, :-1].values
+    y_test = test_df.iloc[:, -1].values
+
+    # Encode labels
+    y_test_encoded = label_encoder.transform(y_test)
+
+    # Predict
+    y_pred = model.predict(X_test)
+
+    # Confusion matrix
+    cm = confusion_matrix(y_test_encoded, y_pred)
+
+    # Plot
+    fig, ax = plt.subplots()
+    sns.heatmap(cm,
+                annot=True,
+                fmt='d',
+                cmap='Blues',
+                xticklabels=label_encoder.classes_,
+                yticklabels=label_encoder.classes_,
+                ax=ax)
+
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("Actual")
+    ax.set_title("Confusion Matrix")
+
+    st.pyplot(fig)
+
+except Exception as e:
+    st.warning("Confusion matrix unavailable in deployment")
 
 st.write("""
 - Accuracy: 92%  
