@@ -389,4 +389,4 @@ st.write("""
 - Low-cost deployment  
 """)
 
-st.caption("Built by Jhasveni • AI Engineer")
+st.caption("Built by Jhasveni • Durgesh ")
