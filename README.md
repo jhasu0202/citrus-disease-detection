@@ -13,6 +13,7 @@ This project implements a computer vision-based system to automatically detect a
 
 The system processes leaf images, extracts relevant features, and predicts the disease category using a trained machine learning model.
 
+
 ---
 
 ## ⚙️ Approach
