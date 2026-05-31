@@ -228,10 +228,16 @@ try:
     y_pred = model.predict(X_test)
     cm = confusion_matrix(y_test_encoded, y_pred)
 
-    fig, ax = plt.subplots()
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=label_encoder.classes_,
-                yticklabels=label_encoder.classes_)
+   fig, ax = plt.subplots(figsize=(5, 4))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+            xticklabels=label_encoder.classes_,
+            yticklabels=label_encoder.classes_,
+            ax=ax)
+ax.tick_params(axis='x', labelsize=8)
+ax.tick_params(axis='y', labelsize=8)
+
+col_v, _ = st.columns([1, 1])
+with col_v:
     st.pyplot(fig)
 except:
     st.warning("Confusion matrix unavailable in deployment")
