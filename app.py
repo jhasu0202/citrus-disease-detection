@@ -48,83 +48,75 @@ treatment = {
 }
 
 # ─────────────────────────────────────────────
-# FEATURE EXTRACTION — EXACTLY 110 FEATURES
-# MUST match what the training notebook used
+# FEATURE EXTRACTION
+# EXACTLY matches extract_features_new.py
+# (the file used to create train_features.csv)
 # ─────────────────────────────────────────────
 def extract_features(pil_image):
     """
-    Extracts exactly 110 features to match the trained model:
-      HSV  : 32 bins × 3 channels        =  96 features
-      GLCM : 4 properties × mean only    =   4 features
-      LBP  : radius=1, n_points=8, unif  =  10 features
-                                   TOTAL = 110 features ✅
+    Matches training code extract_features_new.py exactly:
+      - Resize : 256 × 256  (NOT 224)
+      - HSV    : all channels range [0, 256]  (NOT [0,180] for H)
+      - GLCM   : distances=[1], angles=[0]
+                 order: contrast, correlation, energy, homogeneity
+      - LBP    : radius=1, n_points=8, uniform
+                 normalised by sum  (NOT density=True)
+      Total    : 96 + 4 + 10 = 110 features ✅
     """
 
-    # ── Step 1: Resize to 224×224 ────────────────────────────────
-    img_rgb = np.array(pil_image.resize((224, 224)))  # (224, 224, 3) RGB
+    # ── Convert PIL → BGR numpy (same as cv2.imread) ─────────────
+    img_rgb = np.array(pil_image.convert("RGB"))
+    image   = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
-    # ── Step 2: Convert to BGR for OpenCV ────────────────────────
-    img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+    # ── Resize to 256×256 (matches training) ─────────────────────
+    image = cv2.resize(image, (256, 256))
 
-    # ── Step 3: HSV histogram — 96 features ──────────────────────
-    # Use cv2.cvtColor (NOT colorsys) — H range is [0,180] in cv2
-    # colorsys gives H in [0,1] which produces completely different
-    # histograms and breaks the model entirely
-    img_hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-    hsv_features = []
-    for i, (lo, hi) in enumerate([(0, 180), (0, 256), (0, 256)]):
-        hist = cv2.calcHist([img_hsv], [i], None, [32], [lo, hi])
-        hist = cv2.normalize(hist, hist).flatten()
-        hsv_features.extend(hist)
-    # 32 bins × 3 channels = 96 features
+    # ── HSV histogram — 96 features ──────────────────────────────
+    # Training used [0,256] for ALL three channels including Hue
+    hsv    = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    hist_h = cv2.calcHist([hsv], [0], None, [32], [0, 256])
+    hist_s = cv2.calcHist([hsv], [1], None, [32], [0, 256])
+    hist_v = cv2.calcHist([hsv], [2], None, [32], [0, 256])
+    hist_features = np.concatenate((hist_h, hist_s, hist_v)).flatten()
+    # 32 × 3 = 96 features
 
-    # ── Step 4: Grayscale for texture ────────────────────────────
-    gray_u8 = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    # ── GLCM — 4 features ────────────────────────────────────────
+    # Order must match training: contrast, correlation, energy, homogeneity
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    glcm        = graycomatrix(gray, distances=[1], angles=[0],
+                               levels=256, symmetric=True, normed=True)
+    contrast    = graycoprops(glcm, 'contrast')[0, 0]
+    correlation = graycoprops(glcm, 'correlation')[0, 0]
+    energy      = graycoprops(glcm, 'energy')[0, 0]
+    homogeneity = graycoprops(glcm, 'homogeneity')[0, 0]
+    glcm_features = np.array([contrast, correlation, energy, homogeneity])
+    # 4 features
 
-    # ── Step 5: GLCM — 4 features ────────────────────────────────
-    # distances=[1], angles=[0]          → 1 distance, 1 angle
-    # 4 properties, mean only (no std)   → 4 × 1 = 4 features
-    # ⚠️ Do NOT add more distances/angles/props — model expects 4
-    glcm = graycomatrix(
-        gray_u8,
-        distances=[1],
-        angles=[0],
-        levels=256,
-        symmetric=True,
-        normed=True
-    )
-    glcm_features = []
-    for prop in ['contrast', 'dissimilarity', 'homogeneity', 'energy']:
-        glcm_features.append(float(graycoprops(glcm, prop)[0, 0]))
-    # 4 features ✅
+    # ── LBP histogram — 10 features ──────────────────────────────
+    radius   = 1
+    n_points = 8 * radius        # = 8
+    lbp_bins = n_points + 2      # = 10
+    lbp      = local_binary_pattern(gray, n_points, radius, method="uniform")
+    lbp_hist, _ = np.histogram(lbp.ravel(), bins=lbp_bins, range=(0, lbp_bins))
+    lbp_hist = lbp_hist.astype("float")
+    lbp_hist /= (lbp_hist.sum() + 1e-6)   # normalise by sum (matches training)
+    # 10 features
 
-    # ── Step 6: LBP histogram — 10 features ──────────────────────
-    # radius=1, n_points=8 → uniform LBP → n_points+2 = 10 bins
-    # ⚠️ Do NOT change radius — model expects exactly 10 LBP features
-    lbp = local_binary_pattern(gray_u8, P=8, R=1, method='uniform')
-    lbp_hist, _ = np.histogram(
-        lbp.ravel(), bins=10, range=(0, 10), density=True
-    )
-    # 10 features ✅
-
-    # ── Step 7: Concatenate ───────────────────────────────────────
-    features = np.concatenate([hsv_features, glcm_features, lbp_hist])
+    # ── Concatenate ───────────────────────────────────────────────
+    features = np.concatenate((hist_features, glcm_features, lbp_hist))
     # 96 + 4 + 10 = 110 ✅
 
-    # ⚠️ Do NOT normalise here — the StandardScaler inside the
-    # sklearn Pipeline handles this. Re-normalising distorts features.
-
     assert features.shape[0] == 110, \
-        f"Feature count bug: got {features.shape[0]}, expected 110"
+        f"Feature mismatch: got {features.shape[0]}, expected 110"
 
-    # LBP visual for display
+    # LBP visualisation for display
     lbp_display = (lbp / (lbp.max() + 1e-6) * 255).astype(np.uint8)
 
-    return features.reshape(1, -1), gray_u8, lbp_display
+    return features.reshape(1, -1), gray, lbp_display
 
 
 # ─────────────────────────────────────────────
-# UI HEADER
+# UI
 # ─────────────────────────────────────────────
 st.title("🍊 AI-Powered Citrus Disease Detection System")
 st.markdown("**92% accuracy on real-world dataset** — Computer vision for agricultural diagnosis.")
@@ -148,7 +140,7 @@ if uploaded_file:
         pil_image = Image.open(uploaded_file).convert("RGB")
 
         if pil_image.size[0] < 100 or pil_image.size[1] < 100:
-            st.warning("⚠️ Low resolution image may reduce accuracy. Use a clear close-up photo.")
+            st.warning("⚠️ Low resolution image may reduce accuracy.")
 
         col1, col2 = st.columns([1.2, 1])
 
@@ -156,7 +148,7 @@ if uploaded_file:
             st.image(pil_image, caption="Uploaded Leaf Image", use_container_width=True)
             st.info("💡 Best results: single leaf, natural daylight, plain background")
 
-        # ── EXTRACT + PREDICT ─────────────────────────────────────
+        # ── Predict ───────────────────────────────────────────────
         start = time.time()
         features, gray_u8, lbp_display = extract_features(pil_image)
         probs      = model.predict_proba(features)[0]
@@ -168,22 +160,21 @@ if uploaded_file:
         with col1:
             st.caption(f"⏱️ Inference time: {elapsed:.3f} seconds")
 
-        # ── RESULTS ───────────────────────────────────────────────
+        # ── Results ───────────────────────────────────────────────
         with col2:
             st.markdown(f"## 🔬 Prediction: **{label}**")
             st.progress(min(float(confidence), 1.0))
             st.write(f"**Confidence: {confidence*100:.1f}%**")
 
             if confidence < 0.6:
-                st.error("⚠️ Low confidence — try a clearer close-up photo.")
+                st.error("⚠️ Low confidence — try a clearer image.")
             elif confidence < 0.8:
-                st.warning("Moderate confidence — verify manually if possible.")
+                st.warning("Moderate confidence — verify manually.")
             else:
                 st.success("✅ High confidence prediction")
 
             st.markdown("### 📊 Top-3 Predictions")
-            top3 = np.argsort(probs)[::-1][:3]
-            for i in top3:
+            for i in np.argsort(probs)[::-1][:3]:
                 cls_name = label_encoder.classes_[i]
                 st.progress(float(probs[i]))
                 st.write(f"**{cls_name}** → {probs[i]*100:.1f}%")
@@ -191,33 +182,29 @@ if uploaded_file:
             st.markdown("### 🧬 Why this prediction?")
             st.write(f"""
 Detected patterns consistent with **{label}** based on:
-- 🎨 **Colour variation** (HSV histogram — leaf colour and saturation)
-- 🔲 **Texture patterns** (GLCM — roughness, contrast, lesion texture)
-- 🔬 **Micro-structures** (LBP — edge and boundary patterns)
+- 🎨 **Colour variation** (HSV histogram)
+- 🔲 **Texture patterns** (GLCM)
+- 🔬 **Micro-structures** (LBP)
             """)
 
-        # ── DISEASE DETAILS ───────────────────────────────────────
         st.subheader("📋 Disease Information")
         st.write(disease_info.get(label, "Information not available."))
 
         st.subheader("💊 Recommended Action")
         st.write(treatment.get(label, "No recommendation available."))
 
-        # ── FEATURE VISUALISATIONS ────────────────────────────────
         st.subheader("🔍 Feature Visualisation")
         c1, c2 = st.columns(2)
         with c1:
-            st.image(gray_u8, caption="Grayscale (used for GLCM + LBP)", clamp=True)
+            st.image(gray_u8, caption="Grayscale (GLCM + LBP input)", clamp=True)
         with c2:
-            st.image(lbp_display, caption="LBP Pattern (texture micro-structures)",
-                     clamp=True)
+            st.image(lbp_display, caption="LBP Pattern", clamp=True)
 
     except Exception as e:
         st.error(f"❌ Processing failed: {e}")
-        st.write("**Common causes:** corrupted image file, unsupported format, model not loaded.")
 
 # ─────────────────────────────────────────────
-# MODEL VALIDATION SECTION
+# MODEL VALIDATION
 # ─────────────────────────────────────────────
 st.markdown("---")
 st.subheader("📊 Model Validation")
@@ -233,9 +220,8 @@ try:
     y_test     = test_df.iloc[:, -1].values
     y_test_enc = label_encoder.transform(y_test)
     y_pred     = model.predict(X_test)
-
-    cm = confusion_matrix(y_test_enc, y_pred)
-    fig, ax = plt.subplots(figsize=(6, 5))
+    cm         = confusion_matrix(y_test_enc, y_pred)
+    fig, ax    = plt.subplots(figsize=(6, 5))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
                 xticklabels=label_encoder.classes_,
                 yticklabels=label_encoder.classes_, ax=ax)
@@ -247,18 +233,12 @@ except Exception:
     st.warning("Confusion matrix unavailable (test_features.csv not found)")
     st.write("**Reported metrics:** Accuracy: 92% | Precision: 90% | Recall: 91% | F1: 90%")
 
-# ─────────────────────────────────────────────
-# MODEL COMPARISON
-# ─────────────────────────────────────────────
 st.subheader("⚖️ Model Comparison")
 st.table({
     "Model":    ["Random Forest ✅", "XGBoost", "SVM"],
     "Accuracy": ["92%",              "89%",     "85%"]
 })
 
-# ─────────────────────────────────────────────
-# SYSTEM DESIGN
-# ─────────────────────────────────────────────
 st.markdown("---")
 st.subheader("⚙️ System Design")
 col_a, col_b = st.columns(2)
@@ -272,8 +252,8 @@ with col_a:
     """)
     st.markdown("**Feature Engineering**")
     st.write("""
-- **HSV (96 features):** captures colour variation in diseased vs healthy leaves
-- **GLCM (4 features):** contrast, dissimilarity, homogeneity, energy
+- **HSV (96 features):** colour variation in diseased vs healthy leaves
+- **GLCM (4 features):** contrast, correlation, energy, homogeneity
 - **LBP (10 features):** micro-structural boundary patterns
     """)
 
@@ -295,4 +275,4 @@ with col_b:
 st.markdown("---")
 st.info("This system is designed for early screening and decision support — "
         "not a replacement for expert agronomic diagnosis.")
-st.caption("Built by Jhasveni • Durgesh | IEEE Published Research")
+st.caption("Built by Jhasveni • Durgesh")
