@@ -23,8 +23,15 @@ from tensorflow.keras.layers import (GlobalAveragePooling2D, GlobalMaxPooling2D,
                                        Reshape, Multiply, Concatenate, Conv2D, Add, Activation, Lambda)
 from tensorflow.keras.models import Model
 
-# ------------------- CONFIG -------------------
+import os
+import gdown
+
 WEIGHTS_PATH = "resnet50_cbam_finetuned_best.keras"
+GDRIVE_FILE_ID = "https://drive.google.com/file/d/1WbNhGQIKob3B-Un8rvC6dRVqixHK-9e8/view?usp=drive_link"  # <-- paste your file ID from Step 1
+
+if not os.path.exists(WEIGHTS_PATH):
+    with st.spinner("Downloading model weights (first run only, ~228MB)..."):
+        gdown.download(id=GDRIVE_FILE_ID, output=WEIGHTS_PATH, quiet=False)
 IMG_SIZE = (224, 224)
 CLASS_NAMES = ["Anthracnose", "Black_Spot", "Canker", "Healthy", "Melanose"]
 # ------------------------------------------------
