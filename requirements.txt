@@ -1,12 +1,5 @@
 streamlit
+tensorflow-cpu==2.15.0
+pillow
 numpy
-pandas
-scikit-learn
-joblib
-Pillow
-opencv-python-headless
-scikit-image
-matplotlib
-seaborn
-tensorflow
 gdown
