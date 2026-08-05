@@ -5,13 +5,13 @@ Loads the fine-tuned ResNet50+CBAM model and lets you upload a leaf
 photo to get a live disease prediction with confidence scores.
 
 Setup:
-    1. Download your trained weights file from Google Drive:
-       citrus_project/resnet50_cbam_finetuned_best.keras
-       and place it in the SAME FOLDER as this app.py
-    2. pip install streamlit tensorflow pillow numpy
-    3. Run:  streamlit run app.py
+    1. Set WEIGHTS_URL below to your GitHub Release asset URL.
+    2. pip install streamlit tensorflow-cpu pillow numpy
+    3. Run:  streamlit run "app(dl).py"
 """
 
+import os
+import requests
 import streamlit as st
 import numpy as np
 from PIL import Image
@@ -23,18 +23,22 @@ from tensorflow.keras.layers import (GlobalAveragePooling2D, GlobalMaxPooling2D,
                                        Reshape, Multiply, Concatenate, Conv2D, Add, Activation, Lambda)
 from tensorflow.keras.models import Model
 
-import os
-import gdown
-
+# ------------------- CONFIG -------------------
 WEIGHTS_PATH = "resnet50_cbam_finetuned_best.keras"
-GDRIVE_FILE_ID = "https://drive.google.com/file/d/1WbNhGQIKob3B-Un8rvC6dRVqixHK-9e8/view?usp=drive_link"  # <-- paste your file ID from Step 1
-
-if not os.path.exists(WEIGHTS_PATH):
-    with st.spinner("Downloading model weights (first run only, ~228MB)..."):
-        gdown.download(id=GDRIVE_FILE_ID, output=WEIGHTS_PATH, quiet=False)
+WEIGHTS_URL = "https://github.com/jhasu0202/citrus-disease-detection/releases/download/v1.0-weights/resnet50_cbam_finetuned_best.keras"
 IMG_SIZE = (224, 224)
 CLASS_NAMES = ["Anthracnose", "Black_Spot", "Canker", "Healthy", "Melanose"]
 # ------------------------------------------------
+
+
+def download_weights():
+    if not os.path.exists(WEIGHTS_PATH):
+        with st.spinner("Downloading model weights (first run only, ~228MB)..."):
+            response = requests.get(WEIGHTS_URL, stream=True)
+            response.raise_for_status()
+            with open(WEIGHTS_PATH, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
 
 
 # ---- CBAM building blocks (must match training exactly) ----
@@ -71,6 +75,8 @@ def cbam_block(input_feature, ratio=8):
 
 @st.cache_resource
 def load_trained_model():
+    download_weights()
+
     base_model = ResNet50(input_shape=(224, 224, 3), include_top=False, weights=None)
     x = base_model.output
     x = cbam_block(x)
