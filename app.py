@@ -1,278 +1,283 @@
-import streamlit as st
-import numpy as np
-import joblib
+from __future__ import annotations
+
 import time
+from pathlib import Path
+
 import cv2
-from PIL import Image
+import joblib
+import numpy as np
+import streamlit as st
+from PIL import Image, ImageOps
 from skimage.feature import graycomatrix, graycoprops, local_binary_pattern
 
-# ─────────────────────────────────────────────
-# CONFIG
-# ─────────────────────────────────────────────
-st.set_page_config(page_title="Citrus AI System", layout="wide")
+ROOT = Path(__file__).resolve().parent
+MODEL_PATH = ROOT / "classical_ml" / "final_rf_tuned.pkl"
+ENCODER_PATH = ROOT / "classical_ml" / "rf_label_encoder.pkl"
 
-# ─────────────────────────────────────────────
-# LOAD MODEL
-# ─────────────────────────────────────────────
-@st.cache_resource
+st.set_page_config(
+    page_title="CitrusCare | Citrus Leaf Screening",
+    page_icon="🍊",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+DISEASE_INFO = {
+    "Anthracnose": (
+        "A fungal disease that may cause dark lesions on citrus leaves, twigs, or fruit.",
+        "Inspect affected growth and consult local agricultural extension services about suitable management.",
+    ),
+    "Black Spot": (
+        "A citrus fungal disease associated with dark spots or lesions on affected plant tissue.",
+        "Monitor symptoms and seek locally approved disease-management guidance.",
+    ),
+    "Canker": (
+        "A bacterial disease that can cause raised, corky lesions, sometimes surrounded by a yellow halo.",
+        "Avoid moving potentially infected plant material and ask a local plant-health expert for confirmation.",
+    ),
+    "Greening": (
+        "Citrus greening (HLB) is serious, and visual symptoms can overlap with nutrient deficiencies.",
+        "Arrange expert confirmation promptly and follow local plant-health authority guidance.",
+    ),
+    "Healthy": (
+        "The image looks most similar to the model's Healthy training class.",
+        "Continue routine monitoring. A model prediction cannot rule out every disease or plant stress.",
+    ),
+    "Melanose": (
+        "A fungal disease that may cause small, rough, dark spots on citrus plant tissue.",
+        "Monitor whether symptoms spread and consult locally approved guidance if concerned.",
+    ),
+}
+
+
+@st.cache_resource(show_spinner="Loading the trained Random Forest model…")
 def load_model():
-    try:
-        model = joblib.load("classical_ml/final_rf_tuned.pkl")
-        le    = joblib.load("classical_ml/rf_label_encoder.pkl")
-        return model, le
-    except Exception as e:
-        st.error(f"Model failed to load: {e}")
-        return None, None
-
-model, label_encoder = load_model()
-
-# ─────────────────────────────────────────────
-# DOMAIN KNOWLEDGE
-# ─────────────────────────────────────────────
-disease_info = {
-    "Anthracnose": "Fungal disease causing dark lesions on leaves and fruits.",
-    "Black spot":  "Black lesions that develop in humid environments.",
-    "Canker":      "Bacterial infection that damages leaves and stems.",
-    "Greening":    "Severe citrus disease affecting growth and yield.",
-    "Healthy":     "No disease detected. Leaf appears healthy.",
-    "Melanose":    "Small fungal spots commonly seen on older leaves."
-}
-
-treatment = {
-    "Anthracnose": "Apply appropriate fungicides and remove infected plant parts.",
-    "Black spot":  "Use copper-based fungicide. Reduce leaf wetness and humidity.",
-    "Canker":      "Prune infected branches. Disinfect tools between cuts.",
-    "Greening":    "Control psyllid insect vectors. Remove and destroy infected trees.",
-    "Healthy":     "No action required. Continue regular crop management.",
-    "Melanose":    "Improve airflow around plants. Apply preventive fungicide sprays."
-}
-
-# ─────────────────────────────────────────────
-# FEATURE EXTRACTION
-# EXACTLY matches extract_features_new.py
-# (the file used to create train_features.csv)
-# ─────────────────────────────────────────────
-def extract_features(pil_image):
-    """
-    Matches training code extract_features_new.py exactly:
-      - Resize : 256 × 256  (NOT 224)
-      - HSV    : all channels range [0, 256]  (NOT [0,180] for H)
-      - GLCM   : distances=[1], angles=[0]
-                 order: contrast, correlation, energy, homogeneity
-      - LBP    : radius=1, n_points=8, uniform
-                 normalised by sum  (NOT density=True)
-      Total    : 96 + 4 + 10 = 110 features ✅
-    """
-
-    # ── Convert PIL → BGR numpy (same as cv2.imread) ─────────────
-    img_rgb = np.array(pil_image.convert("RGB"))
-    image   = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-
-    # ── Resize to 256×256 (matches training) ─────────────────────
-    image = cv2.resize(image, (256, 256))
-
-    # ── HSV histogram — 96 features ──────────────────────────────
-    # Training used [0,256] for ALL three channels including Hue
-    hsv    = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    hist_h = cv2.calcHist([hsv], [0], None, [32], [0, 256])
-    hist_s = cv2.calcHist([hsv], [1], None, [32], [0, 256])
-    hist_v = cv2.calcHist([hsv], [2], None, [32], [0, 256])
-    hist_features = np.concatenate((hist_h, hist_s, hist_v)).flatten()
-    # 32 × 3 = 96 features
-
-    # ── GLCM — 4 features ────────────────────────────────────────
-    # Order must match training: contrast, correlation, energy, homogeneity
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    glcm        = graycomatrix(gray, distances=[1], angles=[0],
-                               levels=256, symmetric=True, normed=True)
-    contrast    = graycoprops(glcm, 'contrast')[0, 0]
-    correlation = graycoprops(glcm, 'correlation')[0, 0]
-    energy      = graycoprops(glcm, 'energy')[0, 0]
-    homogeneity = graycoprops(glcm, 'homogeneity')[0, 0]
-    glcm_features = np.array([contrast, correlation, energy, homogeneity])
-    # 4 features
-
-    # ── LBP histogram — 10 features ──────────────────────────────
-    radius   = 1
-    n_points = 8 * radius        # = 8
-    lbp_bins = n_points + 2      # = 10
-    lbp      = local_binary_pattern(gray, n_points, radius, method="uniform")
-    lbp_hist, _ = np.histogram(lbp.ravel(), bins=lbp_bins, range=(0, lbp_bins))
-    lbp_hist = lbp_hist.astype("float")
-    lbp_hist /= (lbp_hist.sum() + 1e-6)   # normalise by sum (matches training)
-    # 10 features
-
-    # ── Concatenate ───────────────────────────────────────────────
-    features = np.concatenate((hist_features, glcm_features, lbp_hist))
-    # 96 + 4 + 10 = 110 ✅
-
-    assert features.shape[0] == 110, \
-        f"Feature mismatch: got {features.shape[0]}, expected 110"
-
-    # LBP visualisation for display
-    lbp_display = (lbp / (lbp.max() + 1e-6) * 255).astype(np.uint8)
-
-    return features.reshape(1, -1), gray, lbp_display
+    if not MODEL_PATH.is_file():
+        raise FileNotFoundError(f"Missing model file: {MODEL_PATH}")
+    if not ENCODER_PATH.is_file():
+        raise FileNotFoundError(f"Missing label encoder: {ENCODER_PATH}")
+    model = joblib.load(MODEL_PATH)
+    encoder = joblib.load(ENCODER_PATH)
+    if not hasattr(model, "predict_proba"):
+        raise TypeError("The loaded model does not provide predict_proba().")
+    if not hasattr(encoder, "inverse_transform"):
+        raise TypeError("The label encoder is not compatible.")
+    return model, encoder
 
 
-# ─────────────────────────────────────────────
-# UI
-# ─────────────────────────────────────────────
-st.title("🍊 AI-Powered Citrus Disease Detection System")
-st.markdown("**92% accuracy on real-world dataset** — Computer vision for agricultural diagnosis.")
+def extract_features(pil_image: Image.Image):
+    """Extract 96 HSV histogram + 4 GLCM + 10 LBP = 110 features."""
+    pil_image = ImageOps.exif_transpose(pil_image).convert("RGB")
+    rgb = np.asarray(pil_image)
+    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+    bgr = cv2.resize(bgr, (256, 256), interpolation=cv2.INTER_AREA)
 
-st.subheader("Dataset")
-st.write("""
-- Total Images: 2027  |  Train: 1808  |  Test: 219
-- 6 classes: Anthracnose, Black Spot, Canker, Greening, Healthy, Melanose
-""")
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    histograms = [
+        cv2.calcHist([hsv], [channel], None, [32], [0, 256]).flatten()
+        for channel in (0, 1, 2)
+    ]
+    hsv_features = np.concatenate(histograms)
 
-# ─────────────────────────────────────────────
-# FILE UPLOADER
-# ─────────────────────────────────────────────
-uploaded_file = st.file_uploader("Upload a citrus leaf image", type=["jpg","jpeg","png"])
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    glcm = graycomatrix(
+        gray, distances=[1], angles=[0], levels=256,
+        symmetric=True, normed=True
+    )
+    glcm_features = np.array([
+        graycoprops(glcm, "contrast")[0, 0],
+        graycoprops(glcm, "correlation")[0, 0],
+        graycoprops(glcm, "energy")[0, 0],
+        graycoprops(glcm, "homogeneity")[0, 0],
+    ], dtype=np.float64)
 
-if uploaded_file:
-    if model is None:
-        st.stop()
+    radius = 1
+    points = 8 * radius
+    lbp = local_binary_pattern(gray, points, radius, method="uniform")
+    lbp_hist, _ = np.histogram(
+        lbp.ravel(), bins=points + 2, range=(0, points + 2)
+    )
+    lbp_hist = lbp_hist.astype(np.float64)
+    lbp_hist /= lbp_hist.sum() + 1e-6
 
-    try:
-        pil_image = Image.open(uploaded_file).convert("RGB")
+    features = np.concatenate((hsv_features, glcm_features, lbp_hist))
+    if features.size != 110:
+        raise ValueError(f"Expected 110 features but extracted {features.size}.")
+    if not np.isfinite(features).all():
+        raise ValueError("Feature extraction produced invalid numeric values.")
 
-        if pil_image.size[0] < 100 or pil_image.size[1] < 100:
-            st.warning("⚠️ Low resolution image may reduce accuracy.")
+    lbp_view = (lbp / (lbp.max() + 1e-6) * 255).astype(np.uint8)
+    return features.reshape(1, -1), gray, lbp_view
 
-        col1, col2 = st.columns([1.2, 1])
 
-        with col1:
-            st.image(pil_image, caption="Uploaded Leaf Image", use_container_width=True)
-            st.info("💡 Best results: single leaf, natural daylight, plain background")
+st.markdown("""
+<style>
+.block-container {max-width: 1350px; padding-top: 1.7rem; padding-bottom: 3rem;}
+.hero {padding: 1.5rem 1.7rem; border-radius: 18px; color: white;
+background: linear-gradient(120deg,#123b2b,#17664a 60%,#2b8058); margin-bottom: 1rem;}
+.hero h1 {color: white; font-size: 2.25rem; margin: 0 0 .35rem 0;}
+.hero p {margin: 0; opacity: .94;}
+.muted {color: #7b8490; font-size: .9rem;}
+</style>
+""", unsafe_allow_html=True)
 
-        # ── Predict ───────────────────────────────────────────────
-        start = time.time()
-        features, gray_u8, lbp_display = extract_features(pil_image)
-        probs      = model.predict_proba(features)[0]
-        idx        = np.argmax(probs)
-        label      = label_encoder.inverse_transform([idx])[0]
-        confidence = probs[idx]
-        elapsed    = time.time() - start
+st.markdown("""
+<div class="hero">
+  <h1>🍊 CitrusCare</h1>
+  <p>Classical machine learning for citrus-leaf disease screening</p>
+</div>
+""", unsafe_allow_html=True)
 
-        with col1:
-            st.caption(f"⏱️ Inference time: {elapsed:.3f} seconds")
-
-        # ── Results ───────────────────────────────────────────────
-        with col2:
-            st.markdown(f"## 🔬 Prediction: **{label}**")
-            st.progress(min(float(confidence), 1.0))
-            st.write(f"**Confidence: {confidence*100:.1f}%**")
-
-            if confidence < 0.6:
-                st.error("⚠️ Low confidence — try a clearer image.")
-            elif confidence < 0.8:
-                st.warning("Moderate confidence — verify manually.")
-            else:
-                st.success("✅ High confidence prediction")
-
-            st.markdown("### 📊 Top-3 Predictions")
-            for i in np.argsort(probs)[::-1][:3]:
-                cls_name = label_encoder.classes_[i]
-                st.progress(float(probs[i]))
-                st.write(f"**{cls_name}** → {probs[i]*100:.1f}%")
-
-            st.markdown("### 🧬 Why this prediction?")
-            st.write(f"""
-Detected patterns consistent with **{label}** based on:
-- 🎨 **Colour variation** (HSV histogram)
-- 🔲 **Texture patterns** (GLCM)
-- 🔬 **Micro-structures** (LBP)
-            """)
-
-        st.subheader("📋 Disease Information")
-        st.write(disease_info.get(label, "Information not available."))
-
-        st.subheader("💊 Recommended Action")
-        st.write(treatment.get(label, "No recommendation available."))
-
-        st.subheader("🔍 Feature Visualisation")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.image(gray_u8, caption="Grayscale (GLCM + LBP input)", clamp=True)
-        with c2:
-            st.image(lbp_display, caption="LBP Pattern", clamp=True)
-
-    except Exception as e:
-        st.error(f"❌ Processing failed: {e}")
-
-# ─────────────────────────────────────────────
-# MODEL VALIDATION
-# ─────────────────────────────────────────────
-st.markdown("---")
-st.subheader("📊 Model Validation")
-
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.metrics import confusion_matrix
+with st.sidebar:
+    st.markdown("## 🍃 CitrusCare")
+    st.caption("Random Forest · Classical ML")
+    st.divider()
+    st.markdown("### How it works")
+    st.write("1. Upload a clear leaf photo\n2. Extract colour and texture features\n3. Predict with the saved Random Forest\n4. Review the result and alternatives")
+    st.divider()
+    st.markdown("### Photo tips")
+    st.write("• Use good, even lighting\n• Keep one leaf in focus\n• Avoid blur and heavy shadows\n• Include the full leaf where possible")
+    st.divider()
+    st.caption("For screening only—not a confirmed agricultural diagnosis.")
 
 try:
-    test_df    = pd.read_csv("classical_ml/test_features.csv")
-    X_test     = test_df.iloc[:, :-1].values
-    y_test     = test_df.iloc[:, -1].values
-    y_test_enc = label_encoder.transform(y_test)
-    y_pred     = model.predict(X_test)
-    cm         = confusion_matrix(y_test_enc, y_pred)
-    fig, ax    = plt.subplots(figsize=(6, 5))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=label_encoder.classes_,
-                yticklabels=label_encoder.classes_, ax=ax)
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("True")
-    ax.set_title("Confusion Matrix")
-    st.pyplot(fig)
-except Exception:
-    st.warning("Confusion matrix unavailable (test_features.csv not found)")
-    st.write("**Reported metrics:** Accuracy: 92% | Precision: 90% | Recall: 91% | F1: 90%")
+    model, encoder = load_model()
+except Exception as exc:
+    st.error("The ML model could not be loaded.")
+    st.code(str(exc))
+    st.info(
+        "Confirm that classical_ml/final_rf_tuned.pkl and "
+        "classical_ml/rf_label_encoder.pkl exist beside this app.py folder, "
+        "and install compatible scikit-learn and joblib versions."
+    )
+    st.stop()
 
-st.subheader("⚖️ Model Comparison")
-st.table({
-    "Model":    ["Random Forest ✅", "XGBoost", "SVM"],
-    "Accuracy": ["92%",              "89%",     "85%"]
-})
+class_names = [str(label) for label in encoder.classes_]
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Classifier", "Random Forest")
+m2.metric("Input features", "110")
+m3.metric("Feature groups", "3")
+m4.metric("Classes in encoder", str(len(class_names)))
 
-st.markdown("---")
-st.subheader("⚙️ System Design")
-col_a, col_b = st.columns(2)
+st.markdown("## 🔎 Analyse a citrus leaf")
+st.write("Upload a JPG, JPEG, or PNG. Your image is resized for consistent feature extraction.")
 
-with col_a:
-    st.markdown("**Why Random Forest?**")
-    st.write("""
-- Works well with handcrafted features (HSV + GLCM + LBP)
-- Does not require large dataset like CNN
-- Interpretable and computationally lightweight
-    """)
-    st.markdown("**Feature Engineering**")
-    st.write("""
-- **HSV (96 features):** colour variation in diseased vs healthy leaves
-- **GLCM (4 features):** contrast, correlation, energy, homogeneity
-- **LBP (10 features):** micro-structural boundary patterns
-    """)
+uploaded = st.file_uploader(
+    "Choose a citrus-leaf image",
+    type=["jpg", "jpeg", "png"],
+    help="A clear, well-lit image generally gives the model the best chance of useful results.",
+)
 
-with col_b:
-    st.markdown("**Known Limitations**")
-    st.write("""
-- Performance drops under extreme/uneven lighting
-- Multiple overlapping leaves reduce accuracy
-- Unseen disease types are not recognised
-- Blurry or very low-resolution images give unreliable results
-    """)
-    st.markdown("**Confidence Interpretation**")
-    st.write("""
-- > 85% → Reliable prediction
-- 60–85% → Moderate confidence, verify manually
-- < 60% → Uncertain — retake photo in better lighting
-    """)
+if uploaded is None:
+    st.info("👆 Upload an image to start the analysis.")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("### 🎨 Colour")
+        st.write("96 HSV histogram values")
+    with c2:
+        st.markdown("### 🧩 Texture")
+        st.write("4 GLCM statistics")
+    with c3:
+        st.markdown("### 🔬 Local patterns")
+        st.write("10 LBP histogram values")
+    st.stop()
 
-st.markdown("---")
-st.info("This system is designed for early screening and decision support — "
-        "not a replacement for expert agronomic diagnosis.")
-st.caption("Built by Jhasveni • Durgesh")
+try:
+    image = ImageOps.exif_transpose(Image.open(uploaded)).convert("RGB")
+except Exception as exc:
+    st.error(f"Could not open this image: {exc}")
+    st.stop()
+
+left, right = st.columns([1.05, 1])
+with left:
+    st.image(image, caption=f"{uploaded.name} · {image.width} × {image.height}", use_container_width=True)
+with right:
+    st.markdown("### Image details")
+    st.write(f"**Dimensions:** {image.width} × {image.height}")
+    st.write(f"**Format:** {uploaded.type or 'Image'}")
+    st.write("**Processing size:** 256 × 256")
+    st.caption("Predictions depend on image quality and similarity to the training data.")
+
+if image.width < 100 or image.height < 100:
+    st.warning("This image is small. Try a higher-resolution photo if possible.")
+
+try:
+    with st.spinner("Extracting image features and predicting…"):
+        start = time.perf_counter()
+        feature_row, gray, lbp_view = extract_features(image)
+        probabilities = np.asarray(model.predict_proba(feature_row)[0], dtype=float)
+        duration = time.perf_counter() - start
+
+    model_classes = list(getattr(model, "classes_", range(len(probabilities))))
+    # Use model's class order to map probabilities back to the label encoder.
+    if len(model_classes) != len(probabilities):
+        raise ValueError("Model class metadata and probability output do not match.")
+
+    predicted_model_class = model_classes[int(np.argmax(probabilities))]
+    predicted_label = str(encoder.inverse_transform(np.array([predicted_model_class]))[0])
+    probability_by_label = {}
+    for model_class, probability in zip(model_classes, probabilities):
+        label = str(encoder.inverse_transform(np.array([model_class]))[0])
+        probability_by_label[label] = float(probability)
+
+    confidence = probability_by_label[predicted_label]
+    details = DISEASE_INFO.get(
+        predicted_label,
+        ("The model selected this class based on its learned image patterns.",
+         "Consider expert confirmation before taking action.")
+    )
+
+    st.divider()
+    st.markdown("## 📋 Prediction result")
+    result_col, confidence_col = st.columns([1.4, 1])
+    with result_col:
+        if predicted_label.strip().lower() == "healthy":
+            st.success(f"### ✅ {predicted_label}")
+        else:
+            st.warning(f"### 🩺 {predicted_label}")
+        st.write(details[0])
+        st.markdown("**Suggested next step**")
+        st.write(details[1])
+    with confidence_col:
+        st.metric("Model confidence", f"{confidence:.1%}")
+        st.progress(float(np.clip(confidence, 0, 1)))
+        st.caption(f"Inference time: {duration * 1000:.1f} ms")
+        st.caption("Confidence is the model's probability estimate, not a guarantee of correctness.")
+
+    st.markdown("### 📊 Class probabilities")
+    ranked = sorted(probability_by_label.items(), key=lambda item: item[1], reverse=True)
+    for label, probability in ranked:
+        label_col, bar_col, pct_col = st.columns([1.3, 3, .7])
+        label_col.write(label)
+        bar_col.progress(float(np.clip(probability, 0, 1)))
+        pct_col.write(f"{probability:.1%}")
+
+    with st.expander("🔬 View feature-extraction images"):
+        image_col1, image_col2 = st.columns(2)
+        with image_col1:
+            st.image(gray, caption="Grayscale image used for texture features", use_container_width=True)
+        with image_col2:
+            st.image(lbp_view, caption="Local Binary Pattern (LBP) visualisation", use_container_width=True)
+        st.caption("The classifier receives 110 numeric features—not these preview images directly.")
+
+    with st.expander("🧠 What the ML pipeline did"):
+        st.markdown(
+            "- **Preprocessing:** oriented and converted the photo to RGB, then resized it to 256 × 256.\n"
+            "- **HSV colour histogram:** 96 values summarise colour distribution.\n"
+            "- **GLCM texture:** 4 statistics describe neighbouring-pixel texture.\n"
+            "- **LBP histogram:** 10 values summarise local texture patterns.\n"
+            "- **Random Forest:** combines many decision trees to predict a class."
+        )
+        st.caption("This explanation reflects the feature extraction implemented in this app. For best reproducibility, it must match the preprocessing used when the saved model was trained.")
+
+    st.warning(
+        "Important: this is an AI screening aid. Leaf images can be ambiguous; "
+        "confirm suspected disease with an agricultural professional before treatment."
+    )
+
+except Exception as exc:
+    st.error("Prediction failed.")
+    st.exception(exc)
+    st.info(
+        "If the error mentions feature count or feature names, the app's feature-extraction "
+        "pipeline may not match the preprocessing used to train the saved model."
+    )
