@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import time
 from pathlib import Path
 
@@ -24,7 +25,7 @@ st.set_page_config(
 DISEASE_INFO = {
     "Anthracnose": (
         "A fungal disease that may cause dark lesions on citrus leaves, twigs, or fruit.",
-        "Inspect affected growth and consult local agricultural extension services about suitable management.",
+        "Inspect affected growth and consult a local agricultural extension service about suitable management.",
     ),
     "Black Spot": (
         "A citrus fungal disease associated with dark spots or lesions on affected plant tissue.",
@@ -61,24 +62,31 @@ def load_model():
         raise TypeError("The loaded model does not provide predict_proba().")
     if not hasattr(encoder, "inverse_transform"):
         raise TypeError("The label encoder is not compatible.")
+    if len(getattr(model, "classes_", [])) != len(encoder.classes_):
+        raise ValueError("Model classes and label-encoder classes do not match.")
     return model, encoder
 
 
 def extract_features(pil_image: Image.Image):
-    """Extract 96 HSV histogram + 4 GLCM + 10 LBP = 110 features."""
+    """
+    Match classical_ml/extract_features_new.py:
+    OpenCV resize (default interpolation), 96 HSV histogram values,
+    4 GLCM values, and 10 LBP histogram values = 110 features.
+    """
+    # Convert to RGB then BGR, matching cv2.imread's BGR colour ordering.
     pil_image = ImageOps.exif_transpose(pil_image).convert("RGB")
-    rgb = np.asarray(pil_image)
-    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-    bgr = cv2.resize(bgr, (256, 256), interpolation=cv2.INTER_AREA)
+    image = cv2.cvtColor(np.asarray(pil_image), cv2.COLOR_RGB2BGR)
 
-    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-    histograms = [
-        cv2.calcHist([hsv], [channel], None, [32], [0, 256]).flatten()
-        for channel in (0, 1, 2)
-    ]
-    hsv_features = np.concatenate(histograms)
+    # Deliberately use cv2.resize's default interpolation, as the training script does.
+    image = cv2.resize(image, (256, 256))
 
-    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    hist_h = cv2.calcHist([hsv], [0], None, [32], [0, 256])
+    hist_s = cv2.calcHist([hsv], [1], None, [32], [0, 256])
+    hist_v = cv2.calcHist([hsv], [2], None, [32], [0, 256])
+    hsv_features = np.concatenate((hist_h, hist_s, hist_v)).flatten()
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     glcm = graycomatrix(
         gray, distances=[1], angles=[0], levels=256,
         symmetric=True, normed=True
@@ -88,15 +96,16 @@ def extract_features(pil_image: Image.Image):
         graycoprops(glcm, "correlation")[0, 0],
         graycoprops(glcm, "energy")[0, 0],
         graycoprops(glcm, "homogeneity")[0, 0],
-    ], dtype=np.float64)
+    ])
 
     radius = 1
-    points = 8 * radius
-    lbp = local_binary_pattern(gray, points, radius, method="uniform")
+    n_points = 8 * radius
+    lbp_bins = n_points + 2
+    lbp = local_binary_pattern(gray, n_points, radius, method="uniform")
     lbp_hist, _ = np.histogram(
-        lbp.ravel(), bins=points + 2, range=(0, points + 2)
+        lbp.ravel(), bins=lbp_bins, range=(0, lbp_bins)
     )
-    lbp_hist = lbp_hist.astype(np.float64)
+    lbp_hist = lbp_hist.astype("float")
     lbp_hist /= lbp_hist.sum() + 1e-6
 
     features = np.concatenate((hsv_features, glcm_features, lbp_hist))
@@ -105,8 +114,11 @@ def extract_features(pil_image: Image.Image):
     if not np.isfinite(features).all():
         raise ValueError("Feature extraction produced invalid numeric values.")
 
-    lbp_view = (lbp / (lbp.max() + 1e-6) * 255).astype(np.uint8)
-    return features.reshape(1, -1), gray, lbp_view
+    # Return PIL images, not raw arrays, for robust browser display.
+    gray_preview = Image.fromarray(gray.astype(np.uint8), mode="L")
+    lbp_scaled = (lbp / (lbp.max() + 1e-6) * 255).astype(np.uint8)
+    lbp_preview = Image.fromarray(lbp_scaled, mode="L")
+    return features.reshape(1, -1), gray_preview, lbp_preview
 
 
 st.markdown("""
@@ -132,10 +144,20 @@ with st.sidebar:
     st.caption("Random Forest · Classical ML")
     st.divider()
     st.markdown("### How it works")
-    st.write("1. Upload a clear leaf photo\n2. Extract colour and texture features\n3. Predict with the saved Random Forest\n4. Review the result and alternatives")
+    st.write(
+        "1. Upload a clear leaf photo\n"
+        "2. Extract colour and texture features\n"
+        "3. Predict with the saved Random Forest\n"
+        "4. Review the result and alternatives"
+    )
     st.divider()
     st.markdown("### Photo tips")
-    st.write("• Use good, even lighting\n• Keep one leaf in focus\n• Avoid blur and heavy shadows\n• Include the full leaf where possible")
+    st.write(
+        "• Use good, even lighting\n"
+        "• Keep one leaf in focus\n"
+        "• Avoid blur and heavy shadows\n"
+        "• Include the full leaf where possible"
+    )
     st.divider()
     st.caption("For screening only—not a confirmed agricultural diagnosis.")
 
@@ -145,9 +167,9 @@ except Exception as exc:
     st.error("The ML model could not be loaded.")
     st.code(str(exc))
     st.info(
-        "Confirm that classical_ml/final_rf_tuned.pkl and "
-        "classical_ml/rf_label_encoder.pkl exist beside this app.py folder, "
-        "and install compatible scikit-learn and joblib versions."
+        "Check that classical_ml/final_rf_tuned.pkl and "
+        "classical_ml/rf_label_encoder.pkl exist and that scikit-learn/joblib "
+        "versions are compatible with the versions used to save the model."
     )
     st.stop()
 
@@ -159,7 +181,7 @@ m3.metric("Feature groups", "3")
 m4.metric("Classes in encoder", str(len(class_names)))
 
 st.markdown("## 🔎 Analyse a citrus leaf")
-st.write("Upload a JPG, JPEG, or PNG. Your image is resized for consistent feature extraction.")
+st.write("Upload a JPG, JPEG, or PNG. The image is resized to 256 × 256 for feature extraction.")
 
 uploaded = st.file_uploader(
     "Choose a citrus-leaf image",
@@ -183,6 +205,8 @@ if uploaded is None:
 
 try:
     image = ImageOps.exif_transpose(Image.open(uploaded)).convert("RGB")
+    # Force decode while the uploaded file is still available.
+    image.load()
 except Exception as exc:
     st.error(f"Could not open this image: {exc}")
     st.stop()
@@ -203,24 +227,24 @@ if image.width < 100 or image.height < 100:
 try:
     with st.spinner("Extracting image features and predicting…"):
         start = time.perf_counter()
-        feature_row, gray, lbp_view = extract_features(image)
+        feature_row, gray_preview, lbp_preview = extract_features(image)
         probabilities = np.asarray(model.predict_proba(feature_row)[0], dtype=float)
-        duration = time.perf_counter() - start
+        elapsed_ms = (time.perf_counter() - start) * 1000
 
-    model_classes = list(getattr(model, "classes_", range(len(probabilities))))
-    # Use model's class order to map probabilities back to the label encoder.
+    # sklearn's model.classes_ contains encoded integer labels; decode each one
+    # using the encoder saved alongside this exact model.
+    model_classes = np.asarray(model.classes_)
     if len(model_classes) != len(probabilities):
         raise ValueError("Model class metadata and probability output do not match.")
 
-    predicted_model_class = model_classes[int(np.argmax(probabilities))]
-    predicted_label = str(encoder.inverse_transform(np.array([predicted_model_class]))[0])
     probability_by_label = {}
-    for model_class, probability in zip(model_classes, probabilities):
-        label = str(encoder.inverse_transform(np.array([model_class]))[0])
+    for encoded_class, probability in zip(model_classes, probabilities):
+        label = str(encoder.inverse_transform(np.asarray([int(encoded_class)]))[0])
         probability_by_label[label] = float(probability)
 
+    predicted_label = max(probability_by_label, key=probability_by_label.get)
     confidence = probability_by_label[predicted_label]
-    details = DISEASE_INFO.get(
+    summary, action = DISEASE_INFO.get(
         predicted_label,
         ("The model selected this class based on its learned image patterns.",
          "Consider expert confirmation before taking action.")
@@ -234,40 +258,44 @@ try:
             st.success(f"### ✅ {predicted_label}")
         else:
             st.warning(f"### 🩺 {predicted_label}")
-        st.write(details[0])
+        st.write(summary)
         st.markdown("**Suggested next step**")
-        st.write(details[1])
+        st.write(action)
     with confidence_col:
         st.metric("Model confidence", f"{confidence:.1%}")
         st.progress(float(np.clip(confidence, 0, 1)))
-        st.caption(f"Inference time: {duration * 1000:.1f} ms")
-        st.caption("Confidence is the model's probability estimate, not a guarantee of correctness.")
+        st.caption(f"Inference time: {elapsed_ms:.1f} ms")
+        st.caption("Confidence is a model probability estimate, not a guarantee of correctness.")
 
     st.markdown("### 📊 Class probabilities")
-    ranked = sorted(probability_by_label.items(), key=lambda item: item[1], reverse=True)
-    for label, probability in ranked:
+    for label, probability in sorted(
+        probability_by_label.items(), key=lambda item: item[1], reverse=True
+    ):
         label_col, bar_col, pct_col = st.columns([1.3, 3, .7])
         label_col.write(label)
         bar_col.progress(float(np.clip(probability, 0, 1)))
         pct_col.write(f"{probability:.1%}")
 
-    with st.expander("🔬 View feature-extraction images"):
+    with st.expander("🔬 View feature-extraction images", expanded=False):
         image_col1, image_col2 = st.columns(2)
         with image_col1:
-            st.image(gray, caption="Grayscale image used for texture features", use_container_width=True)
+            st.image(gray_preview, caption="Grayscale image used for texture features", use_container_width=True)
         with image_col2:
-            st.image(lbp_view, caption="Local Binary Pattern (LBP) visualisation", use_container_width=True)
+            st.image(lbp_preview, caption="Local Binary Pattern (LBP) visualisation", use_container_width=True)
         st.caption("The classifier receives 110 numeric features—not these preview images directly.")
 
-    with st.expander("🧠 What the ML pipeline did"):
+    with st.expander("🧠 What the ML pipeline did", expanded=False):
         st.markdown(
-            "- **Preprocessing:** oriented and converted the photo to RGB, then resized it to 256 × 256.\n"
+            "- **Preprocessing:** image converted to BGR and resized to 256 × 256 using OpenCV.\n"
             "- **HSV colour histogram:** 96 values summarise colour distribution.\n"
             "- **GLCM texture:** 4 statistics describe neighbouring-pixel texture.\n"
             "- **LBP histogram:** 10 values summarise local texture patterns.\n"
-            "- **Random Forest:** combines many decision trees to predict a class."
+            "- **Random Forest:** combines decision trees to predict one of the learned classes."
         )
-        st.caption("This explanation reflects the feature extraction implemented in this app. For best reproducibility, it must match the preprocessing used when the saved model was trained.")
+        st.caption(
+            "Feature extraction was aligned to the operations in classical_ml/extract_features_new.py. "
+            "Phone-photo EXIF orientation is corrected before processing."
+        )
 
     st.warning(
         "Important: this is an AI screening aid. Leaf images can be ambiguous; "
@@ -278,6 +306,6 @@ except Exception as exc:
     st.error("Prediction failed.")
     st.exception(exc)
     st.info(
-        "If the error mentions feature count or feature names, the app's feature-extraction "
-        "pipeline may not match the preprocessing used to train the saved model."
+        "If the error mentions feature count or feature names, verify that the saved model "
+        "was trained using the same 110-feature extraction pipeline."
     )
